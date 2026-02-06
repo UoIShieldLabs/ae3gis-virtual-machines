@@ -1,0 +1,5 @@
+.git-old/
+logs/
+*.qcow2
+*.img
+.DS_Store
