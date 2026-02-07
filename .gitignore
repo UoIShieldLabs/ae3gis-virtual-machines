@@ -1,5 +1,21 @@
-.git-old/
+# macOS
+.DS_Store
+
+# Logs
 logs/
+
+# Generated VM files
 *.qcow2
 *.img
-.DS_Store
+*.iso
+*.pid
+*.log
+
+# Generated directories (contents only, keep structure)
+overlays/*
+!overlays/.gitkeep
+seeds/*
+!seeds/.gitkeep
+
+# Old git history
+.git-old/
