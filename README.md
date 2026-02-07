@@ -1,6 +1,8 @@
 # AE3GIS Virtual Machines
 
-A toolkit for spawning multiple QEMU-based GNS3 virtual machines on macOS (Apple Silicon). Designed for instructors to create a base VM with pre-configured scenarios and distribute clones to students, each with an isolated GNS3 environment.
+A toolkit for spawning multiple QEMU-based GNS3 virtual machines. Designed for instructors to create a base VM with pre-configured scenarios and distribute clones to students, each with an isolated GNS3 environment.
+
+Supports **macOS** (Apple Silicon) and **Linux** (ARM64).
 
 ---
 
@@ -17,23 +19,34 @@ Each student receives their own GNS3 server instance with identical configuratio
 
 ## Prerequisites
 
-### Hardware
-- macOS with Apple Silicon (M1/M2/M3/M4)
-- Minimum 16GB RAM recommended (each VM uses 12GB by default)
+### macOS (Apple Silicon)
 
-### Software
+**Hardware:** M1/M2/M3/M4 Mac with 16GB+ RAM
 
-Install QEMU via Homebrew:
-
+**Software:**
 ```bash
 brew install qemu
 ```
 
-### Network
+**Network:** Uses `vmnet-bridged` (default interface: `en1`)
 
-The script uses bridged networking (`vmnet-bridged`) which requires:
-- A network interface to bridge (default: `en1`)
-- Static IP range available on your network for student VMs
+### Linux (ARM64)
+
+**Hardware:** ARM64 system with KVM support and 16GB+ RAM
+
+**Software:**
+```bash
+# Ubuntu/Debian
+sudo apt install qemu-system-arm qemu-utils genisoimage
+
+# Fedora/RHEL
+sudo dnf install qemu-system-aarch64 qemu-img genisoimage
+```
+
+**Network:** Uses Linux bridge (default: `virbr0`). Ensure bridge is configured:
+```bash
+sudo apt install bridge-utils
+```
 
 ---
 
@@ -41,15 +54,17 @@ The script uses bridged networking (`vmnet-bridged`) which requires:
 
 ```
 .
-├── spawn_in_terminals.sh    # Main script to spawn VMs
-├── spawn-vm-command.md      # Reference: manual QEMU commands
+├── spawn_in_terminals.sh        # macOS spawn script
+├── spawn_in_terminals_linux.sh  # Linux spawn script
+├── spawn-vm-command.md          # Reference: manual QEMU commands
 ├── base/
-│   ├── root.qcow2           # Base disk image (you create this)
-│   ├── vars.fd              # UEFI variable store
-│   └── seed-init/           # Cloud-init templates for base image
-├── overlays/                # Generated: per-VM overlay disks
-└── seeds/                   # Generated: per-VM cloud-init configs
+│   ├── root.qcow2               # Base disk image (you create this)
+│   ├── vars.fd                  # UEFI variable store
+│   └── seed-init/               # Cloud-init templates for base image
+├── overlays/                    # Generated: per-VM overlay disks
+└── seeds/                       # Generated: per-VM cloud-init configs
 ```
+
 
 ---
 
@@ -75,11 +90,16 @@ qemu-img create -f raw vars.fd 64M
 Build the seed ISO for initial setup:
 
 ```bash
+# macOS
 hdiutil makehybrid -iso -joliet -default-volume-name cidata -o seed-init.iso seed-init
+
+# Linux
+genisoimage -output seed-init.iso -volid cidata -joliet -rock seed-init
 ```
 
 Boot the base VM to install GNS3 and configure your environment:
 
+**macOS:**
 ```bash
 sudo qemu-system-aarch64 \
   -accel hvf -machine virt,highmem=on -cpu host \
@@ -92,6 +112,20 @@ sudo qemu-system-aarch64 \
   -nographic
 ```
 
+**Linux:**
+```bash
+sudo qemu-system-aarch64 \
+  -enable-kvm -machine virt,highmem=on -cpu host \
+  -smp 4 -m 8192 \
+  -bios /usr/share/AAVMF/AAVMF_CODE.fd \
+  -drive if=pflash,format=raw,unit=1,file=vars.fd \
+  -drive if=virtio,file=root.qcow2,format=qcow2 \
+  -drive if=virtio,file=seed-init.iso,format=raw,readonly=on \
+  -netdev bridge,id=net0,br=virbr0 \
+  -device virtio-net-pci,netdev=net0 \
+  -nographic
+```
+
 Once booted, configure your GNS3 projects, install Docker images, and set up any scenarios you need. Then shut down the VM cleanly:
 
 ```bash
@@ -100,17 +134,26 @@ sudo shutdown -h now
 
 ### Step 2: Spawn Student VMs
 
-Use the main script to create multiple VM clones:
-
+**macOS:**
 ```bash
 ./spawn_in_terminals.sh COUNT START_IP [GATEWAY] [PREFIX_LEN]
+```
+
+**Linux:**
+```bash
+./spawn_in_terminals_linux.sh COUNT START_IP [GATEWAY] [PREFIX_LEN]
 ```
 
 **Example — Spawn 10 VMs starting at IP 10.193.80.101:**
 
 ```bash
+# macOS
 ./spawn_in_terminals.sh 10 10.193.80.101
+
+# Linux
+./spawn_in_terminals_linux.sh 10 10.193.80.101
 ```
+
 
 This will:
 - Create overlay disks (copy-on-write, minimal storage)
@@ -134,18 +177,22 @@ Each student connects to their assigned VM:
 ## Script Parameters
 
 ```bash
+# macOS
 ./spawn_in_terminals.sh COUNT START_IP [GATEWAY] [PREFIX_LEN] [EXTRA_DNS] [NAME_PREFIX] [BRIDGE]
+
+# Linux
+./spawn_in_terminals_linux.sh COUNT START_IP [GATEWAY] [PREFIX_LEN] [EXTRA_DNS] [NAME_PREFIX] [BRIDGE]
 ```
 
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `COUNT` | 3 | Number of VMs to spawn |
-| `START_IP` | 10.193.80.101 | First VM's static IP |
-| `GATEWAY` | auto-detect | Network gateway (auto-detected from host) |
-| `PREFIX_LEN` | 24 | CIDR prefix length |
-| `EXTRA_DNS` | — | Additional DNS servers (comma-separated) |
-| `NAME_PREFIX` | overlay | VM naming prefix |
-| `BRIDGE` | en1 | macOS network interface to bridge |
+| Parameter | macOS Default | Linux Default | Description |
+|-----------|---------------|---------------|-------------|
+| `COUNT` | 3 | 3 | Number of VMs to spawn |
+| `START_IP` | 10.193.80.101 | 10.193.80.101 | First VM's static IP |
+| `GATEWAY` | auto-detect | auto-detect | Network gateway |
+| `PREFIX_LEN` | 24 | 24 | CIDR prefix length |
+| `EXTRA_DNS` | — | — | Additional DNS servers (comma-separated) |
+| `NAME_PREFIX` | overlay | overlay | VM naming prefix |
+| `BRIDGE` | en1 | virbr0 | Network interface/bridge |
 
 ### Environment Variables
 
@@ -154,7 +201,9 @@ Each student connects to their assigned VM:
 | `SMP` | 4 | vCPUs per VM |
 | `MEM_MB` | 12288 | RAM per VM (MB) |
 | `BASE_QCOW2` | base/root.qcow2 | Path to base image |
-| `TERM_APP` | terminal | Use `iterm` for iTerm2 |
+| `TERM_APP` | terminal | macOS: use `iterm` for iTerm2 |
+| `TERM_EMU` | auto-detect | Linux: `gnome-terminal`, `konsole`, `xterm` |
+| `BIOS_FD` | auto-detect | Path to UEFI firmware |
 
 ---
 
